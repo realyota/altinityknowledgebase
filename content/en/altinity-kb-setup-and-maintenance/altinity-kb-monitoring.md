@@ -17,27 +17,50 @@ What to read / watch on the subject:
 The following metrics should be collected / monitored
 
 * For Host Machine:
-  * CPU
-  * Memory
-  * Network (bytes/packets)
-  * Storage (iops)
-  * Disk Space (free / used)
+  * CPU: saturation, load average, and iowait
+  * Memory: pressure and available memory
+  * Network: throughput, packets, errors, and drops
+  * Storage: latency, throughput, IOPS, and queue depth
+  * Disk Space: free / used
 
 * For ClickHouse:
-  * Connections (Number of queries running)
-  * DDL queue length 
-  * RWLocks
-  * Read / Write / Return (bytes/rows)
-  * Merges (queue length, memory used)
-  * Mutations
-  * Query duration (optional)
-  * Replication queue length and lag
-  * Read only tables
-  * ZooKeeper latencies
-  * Zookeeper operations (count)
-  * S3 errors (if used)
+  * Query workload:
+    * Connections and number of queries running
+    * Query rate, query duration, and long-running queries
+    * Read / Write / Return (bytes/rows)
+    * Query read amplification: selected rows / bytes / marks / ranges / parts
+  * Memory / cache / contention:
+    * Cache hit rates: mark cache, query cache, and page / filesystem cache if used
+    * RWLocks
+  * Parts / background work:
+    * Merges (queue length, memory used)
+    * Mutations
+    * Part growth, max parts per partition, and detached parts
+  * Replication / distributed execution:
+    * Replication queue length, lag, and failed fetch / check events
+    * Read-only replicas
+    * Keeper / ZooKeeper wait time on the ClickHouse side
+    * Keeper / ZooKeeper client metrics on the ClickHouse side: in-flight requests, sessions / watches, operation rates by type, init / close churn, and exceptions
+    * DDL queue length and Distributed tables backlog
+  * Optional integrations:
+    * S3 errors and remote-disk latency (if used)
+    * Kafka consumer health (if used)
 
-* For Zookeeper:
+* For ClickHouse Keeper (if used):
+  * Quorum / leader election stability, leader churn, and quorum uptime
+  * Follower / observer sync, proposal size, and proposal / ack / commit / propagation latency
+  * Outstanding requests and backlog in prep / sync / commit / final processing queues
+  * Sessions, connection rejects / drops, and watch growth if your workload uses watches heavily
+  * Fsync time / rate, snapshot time, open file descriptors, and other disk-pressure signals
+  * TLS handshake or ensemble-auth failures if enabled
+  * [See also clickhouse-keeper](../altinity-kb-zookeeper/clickhouse-keeper/)
+
+* For ZooKeeper (if used):
+  * Session health, outstanding requests, connection churn, and watch counts
+  * Znode count / growth and approximate data size
+  * Packets sent / received, leader election, quorum uptime, follower sync time, and request latency
+  * Snapshot / fsync pressure, unrecoverable errors, and digest mismatches
+  * JVM heap / GC / pause and thread health
   * [See separate article](../altinity-kb-zookeeper/zookeeper-monitoring/)
 
 
@@ -112,6 +135,8 @@ ClickHouse allows to access lots of internals using system tables. The main tabl
 
 Minimum necessary set of checks
 
+The HTTP checks below assume the default HTTP interface on port `8123`; if your deployment uses HTTPS or a non-default port, adjust the URL accordingly.
+
 <table>
   <tr>
    <td><strong>Check Name</strong>
@@ -124,7 +149,7 @@ Minimum necessary set of checks
   <tr>
    <td>ClickHouse status
    </td>
-   <td><code>$ curl 'http://localhost:8123/'</code>
+   <td><code>$ curl 'http://localhost:8123/ping'</code>
 <p>
 <code>Ok.</code>
    </td>
@@ -132,11 +157,13 @@ Minimum necessary set of checks
    </td>
   </tr>
   <tr>
-   <td>Too many simultaneous queries. Maximum: 100 (by default)
+   <td>Too many simultaneous queries (compare with your configured concurrency limits)
    </td>
    <td><code>select value from system.metrics </code>
 <p>
 <code>where metric='Query'</code>
+<p>
+Compare with <code>max_concurrent_queries</code> and any per-user or per-query-type limits; <code>max_concurrent_queries = 0</code> means unlimited by default.
    </td>
    <td><code>Critical</code>
    </td>
@@ -147,12 +174,14 @@ Minimum necessary set of checks
    <td><code>$ curl 'http://localhost:8123/replicas_status'</code>
 <p>
 <code>Ok.</code>
+<p>
+Lag reporting for this endpoint depends on <code>max_replica_delay_for_distributed_queries</code>; set that threshold to match the replica delay you want this check to treat as unhealthy.
    </td>
    <td><code>High</code>
    </td>
   </tr>
   <tr>
-   <td>Read only replicas (reflected by <code>replicas_status</code> as well)
+   <td>Replicated tables in read-only state (reflected by <code>replicas_status</code> as well)
    </td>
    <td><code>select value from system.metrics </code>
 <p>
@@ -169,6 +198,8 @@ Minimum necessary set of checks
 <code>from system.replication_queue</code>
 <p>
 <code>where num_tries > 100 or num_postponed > 1000</code>
+<p>
+See also: <a href="/altinity-kb-setup-and-maintenance/altinity-kb-replication-queue/">Replication queue</a>
    </td>
    <td><code>High</code>
    </td>
@@ -186,9 +217,9 @@ Minimum necessary set of checks
   <tr>
    <td>ZooKeeper exceptions
    </td>
-   <td><code>select value from system.events </code>
+   <td><code>select event, value from system.events </code>
 <p>
-<code>where event='ZooKeeperHardwareExceptions'</code>
+<code>where event in ('ZooKeeperHardwareExceptions', 'ZooKeeperUserExceptions', 'ZooKeeperOtherExceptions')</code>
    </td>
    <td><code>Medium</code>
    </td>
@@ -196,7 +227,7 @@ Minimum necessary set of checks
   <tr>
    <td>Other CH nodes are available
    </td>
-   <td><code>$ for node in `echo "select distinct host_address from system.clusters where host_name !='localhost'" | curl 'http://localhost:8123/' --silent --data-binary @-`; do curl "http://$node:8123/" --silent ; done | sort -u</code>
+   <td><code>$ for node in `echo "select distinct host_address from system.clusters where is_local = 0" | curl 'http://localhost:8123/' --silent --data-binary @-`; do curl "http://$node:8123/ping" --silent ; done | sort -u</code>
 <p>
 <code>Ok.</code>
    </td>
@@ -204,9 +235,9 @@ Minimum necessary set of checks
    </td>
   </tr>
   <tr>
-   <td>All CH clusters are available (i.e. every configured cluster has enough replicas to serve queries)
+   <td>All CH clusters are available (i.e. every configured cluster has at least one reachable replica per shard)
    </td>
-   <td><code>for cluster in `echo "select distinct cluster from system.clusters where host_name !='localhost'" | curl 'http://localhost:8123/' --silent --data-binary @-` ; do clickhouse-client --query="select '$cluster', 'OK' from cluster('$cluster', system, one)" ; done </code>
+   <td><code>for cluster in `echo "select distinct cluster from system.clusters where is_local = 0" | curl 'http://localhost:8123/' --silent --data-binary @-` ; do clickhouse-client --query="select '$cluster', 'OK' from cluster('$cluster', system, one)" ; done </code>
    </td>
    <td><code>Critical</code>
    </td>
@@ -214,8 +245,9 @@ Minimum necessary set of checks
   <tr>
    <td>There are files in 'detached' folders
    </td>
-   <td><code>$ find /var/lib/clickhouse/data/*/*/detached/* -type d | wc -l; \
-19.8+</code>
+   <td><code>$ find /var/lib/clickhouse/data/*/*/detached/* -type d | wc -l</code>
+<p>
+Or, if <code>system.detached_parts</code> is available on your build:
 <p>
 <code>select count() from system.detached_parts</code>
    </td>
@@ -223,19 +255,23 @@ Minimum necessary set of checks
    </td>
   </tr>
   <tr>
-   <td>Too many parts: \
-Number of parts is growing; \
-Inserts are being delayed; \
+   <td>Too many parts:
+<p>
+Number of parts is growing;
+<p>
+Inserts are being delayed;
+<p>
 Inserts are being rejected
    </td>
    <td><code>select value from system.asynchronous_metrics </code>
 <p>
-<code>where metric='MaxPartCountForPartition';</code>
+<code>where metric='MaxPartCountForPartition'</code>
 <p>
-<code>select value from system.events/system.metrics </code>
+<code>select value from system.metrics </code>
 <p>
-<code>where event/metric='DelayedInserts'; \
-select value from system.events </code>
+<code>where metric='DelayedInserts'</code>
+<p>
+<code>select value from system.events </code>
 <p>
 <code>where event='RejectedInserts'</code>
    </td>
@@ -308,11 +344,11 @@ select value from system.events where event='DataAfterMutationDiffersFromReplica
 The following queries are recommended to be included in monitoring:
 
 * `SELECT * FROM system.replicas`
-  * For more information, see the ClickHouse guide on [System Tables](https://clickhouse.tech/docs/en/operations/system_tables/#system_tables-replicas)
+  * For more information, see the ClickHouse guide on [system.replicas](https://clickhouse.com/docs/operations/system-tables/replicas)
 * `SELECT * FROM system.merges`
   * Checks on the speed and progress of currently executed merges.
 * `SELECT * FROM system.mutations`
-  * This is the source of information on the speed and progress of currently executed merges.
+  * This is the source of information on pending and running table mutations and their progress.
 
 ## Monitoring ClickHouse logs 
 
@@ -345,3 +381,5 @@ See https://clickhouse.com/docs/en/operations/opentelemetry/
 * [Unsorted notes on monitor and Alerts](https://docs.google.com/spreadsheets/d/1K92yZr5slVQEvDglfZ88k_7bfsAKqahY9RPp_2tSdVU/edit#gid=521173956)
 * https://intl.cloud.tencent.com/document/product/1026/36887
 * [Tinybird experience (scroll to monitoring section)](https://www.tinybird.co/blog/what-i-learned-operating-clickhouse-part-ii)
+
+
