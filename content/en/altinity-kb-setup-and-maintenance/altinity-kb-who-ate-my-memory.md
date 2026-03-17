@@ -142,6 +142,16 @@ for i in `seq 1 600`; do clickhouse-client --empty_result_for_aggregation_by_emp
 
 ## retrospection analysis of the RAM usage based on query_log and part_log (shows peaks)
 
+> On ClickHouse 24.10+, [`system.query_metric_log`](https://clickhouse.com/docs/operations/system-tables/query_metric_log)
+> complements the reconstruction below for long-running query investigations.
+> It samples per-query memory and `system.events` counters every
+> `query_metric_log_interval` milliseconds (1000 by default), which helps when
+> start/finish-style log records are not enough. The table was added in
+> [24.10](https://clickhouse.com/docs/whats-new/changelog/2024#a-id2410a-clickhouse-release-2410-2024-10-31),
+> and [24.11](https://clickhouse.com/docs/whats-new/changelog/2024#a-id2411a-clickhouse-release-2411-2024-11-26)
+> included early fixes for wrong values and collection-interval accuracy, so
+> prefer 24.11+ if you depend on it for troubleshooting.
+
 ```sql
 WITH 
     now() - INTERVAL 24 HOUR AS min_time,  -- you can adjust that
