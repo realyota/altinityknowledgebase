@@ -25,12 +25,12 @@ keywords:
    - Is there the connection to zookeeper active?
    - Is there the exception during table init? (`Code: 999. Coordination::Exception: Transaction failed (No node): Op #1`)
   
-2. Check `system.replication_queue`. 
-   - How many tasks there / are they moving / are there some very old tasks there? (check `created_time` column, if tasks are 24h old, it is a sign of a problem):
-   - You can use this qkb article query: https://kb.altinity.com/altinity-kb-setup-and-maintenance/altinity-kb-replication-queue/
-   - Check if there are tasks with a high number of `num_tries` or `num_postponed` and `postponed_reason` this is a sign of stuck tasks.
-   - Check the problematic parts affecting the stuck tasks. You can use columns `new_part_name` or `parts_to_merge`
-   - Check which type is the task. If it is `MUTATE_PART` then it is a mutation task. If it is `MERGE_PARTS` then it is a merge task. These tasks can be deleted from the replication queue but `GET_PARTS` should not be deleted.
+2. Check `system.replication_queue`.
+   - How many tasks are there, are they moving, and are there some very old tasks there? Check the `create_time` column; if tasks are 24h old, it is a sign of a problem.
+   - You can use the summary query from the dedicated [Replication queue](../altinity-kb-replication-queue/) article.
+   - Check if there are tasks with a high number of `num_tries` or `num_postponed`, and inspect `postpone_reason`; this is a sign of stuck tasks.
+   - Check the problematic parts affecting the stuck tasks. You can use columns `new_part_name` or `parts_to_merge`.
+   - Check which type the task is. If it is `MUTATE_PART` then it is a mutation task. If it is `MERGE_PARTS` then it is a merge task. These tasks can be deleted from the replication queue, but `GET_PART` should not be deleted.
 
 3. Check `system.errors`
 
@@ -97,15 +97,19 @@ FORMAT TSVRaw;
 
 Sometimes, due to crashes, zookeeper unavailability, slowness, or other reasons, some of the tables can be in Read-Only mode. This allows SELECTS but not INSERTS. So we need to do DROP / RESTORE replica procedure.
 
-Just to be clear, this procedure **will not delete any data**, it will just re-create the metadata in zookeeper with the current state of the [ClickHouse replica](/altinity-kb-setup-and-maintenance/altinity-kb-data-migration/add_remove_replica/).
+The `SYSTEM DROP REPLICA` / `SYSTEM RESTORE REPLICA` flow re-creates the metadata in zookeeper from the current state of the [ClickHouse replica](/altinity-kb-setup-and-maintenance/altinity-kb-data-migration/add_remove_replica/). It does not remove the active table data on disk.
+
+{{% alert title="Warning" color="warning" %}}
+Review generated commands carefully before executing them. Destructive actions can cause data loss, duplication, or replica inconsistency if used incorrectly. Ensure you have a valid backup and understand why each target object is safe to remove or attach. `ALTER TABLE ... DROP DETACHED PARTITION ALL` removes parts from the `detached` directory, so treat it as an optional cleanup step rather than a harmless prerequisite.
+{{% /alert %}}
 
 How it works:
   
 ```sql
-ALTER TABLE table_name DROP DETACHED PARTITION ALL  -- clean detached folder before operation. PARTITION ALL works only for the fresh clickhouse versions
+ALTER TABLE table_name DROP DETACHED PARTITION ALL  -- optional cleanup before operation. PARTITION ALL works only for the fresh clickhouse versions
 DETACH TABLE table_name;  -- Required for DROP REPLICA
 -- Use the zookeeper_path and replica_name from system.replicas. 
-SYSTEM DROP REPLICA 'replica_name' FROM ZKPATH '/table_path_in_zk'; -- It will remove everything from the /table_path_in_zk/replicas/replica_name
+SYSTEM DROP REPLICA 'replica_name' FROM ZKPATH '/table_path_in_zk'; -- It will remove the replica metadata from /table_path_in_zk/replicas/replica_name
 ATTACH TABLE table_name;  -- Table will be in readonly mode, because there is no metadata in ZK and after that execute
 SYSTEM RESTORE REPLICA table_name;  -- It will detach all partitions, re-create metadata in ZK (like it's new empty table), and then attach all partitions back
 SYSTEM SYNC REPLICA table_name; -- Not mandatory. It will Wait for replicas to synchronize parts. Also it's recommended to check `system.detached_parts` on all replicas after recovery is finished.
