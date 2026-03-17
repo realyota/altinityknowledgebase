@@ -151,6 +151,10 @@ for i in `seq 1 600`; do clickhouse-client --empty_result_for_aggregation_by_emp
 > and [24.11](https://clickhouse.com/docs/whats-new/changelog/2024#a-id2411a-clickhouse-release-2411-2024-11-26)
 > included early fixes for wrong values and collection-interval accuracy, so
 > prefer 24.11+ if you depend on it for troubleshooting.
+>
+> If you are investigating a very recent incident, run `SYSTEM FLUSH LOGS`
+> first so `system.query_log` / `system.query_views_log` contain the latest rows
+> before using the retrospective query below.
 
 ```sql
 WITH 
