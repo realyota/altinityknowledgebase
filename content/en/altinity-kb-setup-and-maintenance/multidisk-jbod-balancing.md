@@ -30,7 +30,7 @@ Configurations that can affect disk selected:
 
 Configuration to assist rebalancing:
 
-- MergeTree setting: `min_bytes_to_rebalance_partition_over_jbod`. Setting is not about where the data is written on insert. This setting considers redistribution of parts across disks of the same volume on a merge.
+- The MergeTree setting `min_bytes_to_rebalance_partition_over_jbod` does not control where data is written during inserts. Instead, it governs how parts are redistributed across disks within the same volume during merge operations.
 
 > Note: setting `min_bytes_to_rebalance_partition_over_jbod` does not guarantee balanced partitions and balanced disk usage.
 >
