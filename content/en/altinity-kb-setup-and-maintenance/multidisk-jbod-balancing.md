@@ -7,7 +7,7 @@ ClickHouse provides two options to balance an insert across disks in a volume wi
 
 ## **Round Robin (Default):**
 
-ClickHouse selects the next disk in a round robin manner to write each part created.
+ClickHouse selects the next disk in a round robin manner to write a part.
 
 This is the default setting and is most effective when parts created on insert are roughly the same size.
 
