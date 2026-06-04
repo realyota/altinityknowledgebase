@@ -72,11 +72,13 @@ Increasing the number of nodes offers no significant advantages (unless you need
 
 In clickhouse-keeper-client, paths are now parsed more strictly and must be passed as string literals. In practice, this means using single quotes around paths—for example, `ls '/'` instead of `ls /`, and `get '/clickhouse/path'` instead of `get /clickhouse/path`. 
 
+## Embedded Keeper
+
+To use the embedded ClickHouse Keeper, add the `<keeper_server>` section to the ClickHouse server configuration. In this setup, a separate client-side `<keeper>` section is not required. If your ClickHouse servers use an external ClickHouse Keeper or ZooKeeper ensemble instead, see the section below.
+
 ## Example of a simple cluster
 
 The Keeper ensemble size must be odd because it requires a majority (50% + 1 nodes) to form a quorum. A 2-node Keeper setup will lose quorum after a single node failure, so the recommended number of Keeper replicas is 3.
-
-On `hostname1` and `hostname2` below, ClickHouse can use the embedded Keeper cluster from `<keeper_server>`, so a separate client-side `<keeper>` section is not required. If your ClickHouse servers connect to an external Keeper or ZooKeeper ensemble, see [ClickHouse config for Keeper].
 
 ### hostname1
 
